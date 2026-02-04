@@ -1,0 +1,87 @@
+name: Release Insiders
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24
+  RELEASE_CHANNEL: insiders
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Build and release Tsunamaji insiders
+
+    permissions:
+      contents: write # for softprops/action-gh-release to create GitHub release
+      # https://docs.npmjs.com/generating-provenance-statements#publishing-packages-with-provenance-via-github-actions
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 20
+
+      - name: Resolve version
+        id: vars
+        run: |
+          echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm --filter=!./playgrounds/* install
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: ${{ env.OXIDE_LOCATION }}
+
+      - name: 'Version based on commit: 0.0.0-${{ env.RELEASE_CHANNEL }}.${{ env.SHA_SHORT }}'
+        run: pnpm run version-packages 0.0.0-${{ env.RELEASE_CHANNEL }}.${{ env.SHA_SHORT }}
+
+      - name: Build Tsunamaji
+        run: pnpm run build
+
+      - name: Run pre-publish optimizations scripts
+        run: node ./scripts/pre-publish-optimizations.mjs
+
+      - name: Lock pre-release versions
+        run: node ./scripts/lock-pre-release-versions.mjs
+
+      - name: Upload npm package tarballs
+        uses: actions/upload-artifact@v6
+        with:
+          name: npm-package-tarballs
+          path: dist/*.tgz
+
+      - name: Publish
+        run: |
+          pnpm --recursive publish --tag ${{ env.RELEASE_CHANNEL }} --no-git-checks
+          pnpm publish --tag ${{ env.RELEASE_CHANNEL }} --no-git-checks; popd;
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # - name: Trigger Tsunamaji Play update
+      #   uses: actions/github-script@v8
+      #   with:
+      #     github-token: \$\{\{ secrets.TSUNAMAJI_PLAY_TOKEN }}
+      #     script: |
+      #       await github.rest.actions.createWorkflowDispatch({
+      #         owner: 'tsunamaji',
+      #         repo: 'upgrades',
+      #         ref: 'master',
+      #         workflow_id: 'upgrade-tsunamaji.yml'
+      #       })
