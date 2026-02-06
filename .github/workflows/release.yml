@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Build and release Tsunamaji
+
+    permissions:
+      contents: write # for softprops/action-gh-release to create GitHub release
+      # https://docs.npmjs.com/generating-provenance-statements#publishing-packages-with-provenance-via-github-actions
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 20
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm --filter=!./playgrounds/* install
+
+      - name: Build Tsunamaji
+        run: pnpm run build
+        env:
+          FEATURES_ENV: stable
+
+      - name: Run pre-publish optimizations scripts
+        run: node ./scripts/pre-publish-optimizations.mjs
+
+      - name: Lock pre-release versions
+        run: node ./scripts/lock-pre-release-versions.mjs
+
+      - name: Calculate environment variables
+        run: |
+          echo "RELEASE_CHANNEL=$(node ./scripts/release-channel.js)" >> $GITHUB_ENV
+          echo "TSUNAMAJI_VERSION=$(node -e 'console.log(require(`./packages/package.json`).version);')" >> $GITHUB_ENV
+
+      - name: Publish
+        run: |
+          pnpm --recursive publish --tag ${{ env.RELEASE_CHANNEL }} --no-git-checks
+          pnpm publish --tag ${{ env.RELEASE_CHANNEL }} --no-git-checks; popd;
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # - name: Trigger Tsunamaji Play update
+      #   if: env.RELEASE_CHANNEL == 'latest'
+      #   uses: actions/github-script@v8
+      #   with:
+      #     github-token: ${{ secrets.TAILWIND_PLAY_TOKEN }}
+      #     script: |
+      #       await github.rest.actions.createWorkflowDispatch({
+      #         owner: 'tsunamaji',
+      #         repo: 'upgrades',
+      #         ref: 'main',
+      #         workflow_id: 'upgrade-tsunamaji.yml'
+      #       })

@@ -1,0 +1,102 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [__disabled__]
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20]
+
+        runner:
+          - name: Windows
+            os: windows-latest
+
+          - name: Linux
+            os: ubuntu-latest
+
+          - name: macOS
+            os: macos-14
+
+        integration:
+          - upgrade
+          - vite
+          - cli
+          - postcss
+          - oxide
+          - webpack
+
+        # Exclude windows and macos from being built on feature branches
+        run-all:
+          - ${{ github.ref == 'refs/heads/master' || contains(github.event.pull_request.body, '[ci-all]') }}
+        exclude:
+          - run-all: false
+            runner:
+              name: Windows
+          - run-all: false
+            runner:
+              name: macOS
+
+    runs-on: ${{ matrix.runner.os }}
+    timeout-minutes: 30
+
+    name: ${{ matrix.runner.name }} /  ${{ matrix.integration }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test ${{ matrix.integration }} 1/3
+        run: pnpm run test:integrations ./integrations/${{ matrix.integration }} --shard 1/3
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Test ${{ matrix.integration }} 2/3
+        run: pnpm run test:integrations ./integrations/${{ matrix.integration }} --shard 2/3
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Test ${{ matrix.integration }} 3/3
+        run: pnpm run test:integrations ./integrations/${{ matrix.integration }} --shard 3/3
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+  notify:
+    if: ${{ always() && github.ref == 'refs/heads/master' && needs.tests.result == 'failure' }}
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord
+        uses: discord-actions/message@v2
+        with:
+          webhookUrl: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          message: 'The [most recent ${{ github.workflow }} workflow](<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}>) on the `master` branch has failed.'
