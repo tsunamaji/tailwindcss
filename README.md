@@ -2,7 +2,7 @@
 
 ## Plugins
 
-* [`tailwindcss-raw`](./packages/@tsunamaji-tailwindcss-raw/README.md) ([read docs](https://rozsazoltan.vercel.app/docs/tsunamaji/tailwindcss-raw))
+- [`tailwindcss-raw`](./packages/@tsunamaji-tailwindcss-raw/README.md) ([read docs](https://rozsazoltan.vercel.app/docs/tsunamaji/tailwindcss-raw))
 
 ## License
 
